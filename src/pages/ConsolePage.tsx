@@ -54,6 +54,29 @@ interface RealtimeEvent {
   event: { [key: string]: any };
 }
 
+/**
+ * Type for all search results
+ */
+interface SearchResultImage {
+  url: string;
+  description: string;
+}
+interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  raw_content: string;
+  score: number;
+  published_date: string;
+}
+interface SearchResults {
+  answer: string;
+  query: string;
+  response_time: number;
+  images: Array<SearchResultImage>;
+  results: Array<SearchResult>;
+}
+
 export function ConsolePage() {
   /**
    * Ask user for API Key
@@ -109,6 +132,7 @@ export function ConsolePage() {
    * - realtimeEvents are event logs, which can be expanded
    * - memoryKv is for set_memory() function
    * - coords, marker are for get_weather() function
+   * - searchResults, are for web_search() function
    */
   const [items, setItems] = useState<ItemType[]>([]);
   const [realtimeEvents, setRealtimeEvents] = useState<RealtimeEvent[]>([]);
@@ -124,6 +148,11 @@ export function ConsolePage() {
     lng: -122.418137,
   });
   const [marker, setMarker] = useState<Coordinates | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResults | any>({
+    query: '',
+    answer: '',
+    results: [],
+  });
 
   /**
    * Utility for formatting the timing of logs
@@ -207,6 +236,7 @@ export function ConsolePage() {
       lng: -122.418137,
     });
     setMarker(null);
+    setSearchResults({query: '', answer: ''});
 
     const client = clientRef.current;
     client.disconnect();
@@ -409,6 +439,114 @@ export function ConsolePage() {
           return newKv;
         });
         return { ok: true };
+      }
+    );
+    client.addTool(
+      {
+        name: "web_search",
+        description: "Perform a web search if the user is requesting information that can be found in a web search.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The search query you want to search the web for."
+            },
+            search_depth: {
+              type: "string",
+              description: "The depth of the search. It can be 'basic' or 'advanced'. Default is 'basic' unless specified otherwise.",
+              enum: [
+                "basic",
+                "advanced"
+              ]
+            },
+            topic: {
+              type: "string",
+              description: "The category of the search. This determines which agents will be used. Currently, only 'general' and 'news' are supported.",
+              enum: [
+                "general",
+                "news"
+              ]
+            },
+            days: {
+              type: "integer",
+              description: "The number of days back from the current date to include in the search results. Only available when using the 'news' search topic. Default is 3."
+            },
+            max_results: {
+              type: "integer",
+              description: "The maximum number of search results to return. Default is 5."
+            },
+            include_images: {
+              type: "boolean",
+              description: "Include a list of query-related images in the response. Default is False."
+            },
+            include_image_descriptions: {
+              type: "boolean",
+              description: "When include_images is set to True, this option adds descriptive text for each image. Default is False."
+            },
+            include_answer: {
+              type: "boolean",
+              description: "Include a short answer to the original query. Default is False."
+            },
+            include_raw_content: {
+              type: "boolean",
+              description: "Include the cleaned and parsed HTML content of each search result. Default is False."
+            },
+            include_domains: {
+              type: "array",
+              description: "A list of domains to specifically include in the search results. Default is [], which includes all domains.",
+              items: {
+                type: "string"
+              }
+            },
+            exclude_domains: {
+              type: "array",
+              description: "A list of domains to specifically exclude from the search results. Default is [], which doesn't exclude any domains.",
+              items: {
+                type: "string"
+              }
+            }
+          },
+          required: ['query'],
+        }
+      },
+      async (
+        { query, search_depth, topic, days, max_results, include_images, include_image_descriptions, include_answer, include_raw_content, include_domains, exclude_domains }:
+          { query: string, search_depth: string, topic: string, days: number, max_results: number, include_images: boolean, include_image_descriptions: boolean, include_answer: boolean, include_raw_content: boolean, include_domains: Array<string>, exclude_domains: Array<string> }) => {
+        const result = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            api_key: '<insert api key here>',
+            query,
+            search_depth,
+            topic,
+            days,
+            max_results,
+            include_images,
+            include_image_descriptions,
+            include_answer,
+            include_raw_content,
+            include_domains,
+            exclude_domains,
+          }),
+        });
+        // {"detail":[{"type":"model_attributes_type","loc":["body"],"msg":"Input should be a valid dictionary or object to extract fields from","input":"{\"api_key\":\"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\",\"query\":\"DOCS current stock price NYSE\",\"include_answer\":true}"}]}
+        console.log(result);
+        const json = await result.json();
+        console.log(json);
+        setSearchResults((results: SearchResults) => {
+          const newResults = { ...memoryKv, ...json };
+          return newResults;
+        });
+        setMemoryKv((memoryKv) => {
+          const newKv = { ...memoryKv };
+          newKv['last_web_search'] = `Question: ${json.query}\nAnswer: ${json.answer}`;
+          return newKv;
+        });
+        return json;
       }
     );
     client.addTool(
@@ -692,6 +830,45 @@ export function ConsolePage() {
           </div>
         </div>
         <div className="content-right">
+          <div className="content-block search">
+            <div className="content-block-title">web_search()</div>
+            <div className="content-block-title bottom">
+              {searchResults?.query || 'nothing asked yet'}
+              {!!searchResults?.query && (
+                <>
+                  <b>Query: </b>{searchResults.query}
+                  <br />
+                </>
+              )}
+              {!!searchResults?.answer && (
+                <>
+                  <b>Answer: </b>{searchResults.answer}
+                  <br />
+                </>
+              )}
+            </div>
+            <div className="content-block-body full">
+              <ol>
+                {!!searchResults?.answer && searchResults.results.map((result: any, i: number) => {(
+                  <li>
+                    <ul>
+                      <li>
+                        <a href="{result.url}">{result.title}</a>
+                      </li>
+                      <li>
+                        <b>Score: </b>{result.score}
+                      </li>
+                      <li>
+                        <p>{result.content}</p>
+                      </li>
+                      <li></li>
+                      <li></li>
+                    </ul>
+                  </li>
+                )})}
+              </ol>
+            </div>
+          </div>
           <div className="content-block map">
             <div className="content-block-title">get_weather()</div>
             <div className="content-block-title bottom">

@@ -100,6 +100,15 @@
           }
         }
       }
+      & > div.search {
+        height: 250px;
+        white-space: pre;
+        background-color: #f6f6ff;
+        .content-block-body {
+          padding: 16px;
+          margin-top: 56px;
+        }
+      }
       & > div.kv {
         height: 250px;
         max-height: 250px;
@@ -132,6 +141,8 @@
       }
       .events {
         border-top: 1px solid #e7e7e7;
+        min-height: 0;
+        max-height: 200px;
       }
       .conversation {
         display: flex;
@@ -139,8 +150,6 @@
         width: 100%;
         overflow: hidden;
         height: 200px;
-        min-height: 0;
-        max-height: 200px;
         border-top: 1px solid #e7e7e7;
       }
     }

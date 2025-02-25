@@ -19,13 +19,68 @@ import { WavRecorder, WavStreamPlayer } from '../lib/wavtools/index.js';
 import { instructions } from '../utils/conversation_config.js';
 import { WavRenderer } from '../utils/wav_renderer';
 
-import { X, Edit, Zap, ArrowUp, ArrowDown } from 'react-feather';
+import { X, Edit, Zap, ArrowUp, ArrowDown, Maximize2 } from 'react-feather';
 import { Button } from '../components/button/Button';
 import { Toggle } from '../components/toggle/Toggle';
 import { Map } from '../components/Map';
 
 import './ConsolePage.scss';
 import { isJsxOpeningLikeElement } from 'typescript';
+
+import DOMPurify from 'isomorphic-dompurify';
+
+const ALLOWED_TAGS = [
+  'a',
+  'b',
+  'blockquote',
+  'code',
+  'del',
+  'dd',
+  'dl',
+  'dt',
+  'em',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'i',
+  'img',
+  'kbd',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  's',
+  'sup',
+  'sub',
+  'strong',
+  'strike',
+  'ul',
+  'br',
+  'hr',
+];
+
+const ALLOWED_ATTRS = [
+  'href',
+  'src',
+  'alt',
+  'title',
+  'class',
+  'width',
+  'height',
+  'target',
+  'rel',
+];
+
+const sanitizeHtml = function (value: string, options = { tags: {}}) {
+  const allowedTags = Array.isArray(options.tags) ? options.tags : ALLOWED_TAGS;
+  return DOMPurify.sanitize(value, {
+    ALLOWED_TAGS: allowedTags,
+    ALLOWED_ATTR: ALLOWED_ATTRS,
+  });;
+};
 
 /**
  * Type for result from get_weather() function call
@@ -75,6 +130,12 @@ interface SearchResults {
   response_time?: number;
   images?: SearchResultImage[];
   results: SearchResult[];
+}
+
+interface Research {
+  topic: string;
+  webSearch: SearchResults;
+  conversation: ItemType[];
 }
 
 export function ConsolePage() {
@@ -149,6 +210,7 @@ export function ConsolePage() {
     [key: string]: boolean;
   }>({});
   const [isConnected, setIsConnected] = useState(false);
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [canPushToTalk, setCanPushToTalk] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [memoryKv, setMemoryKv] = useState<{ [key: string]: any }>({});
@@ -157,6 +219,16 @@ export function ConsolePage() {
     lng: -73.756233,
   });
   const [marker, setMarker] = useState<Coordinates | null>(null);
+  const [webSearches, setWebSearches] = useState<SearchResults[]>([]);
+  const [currentResearch, setCurrentResearch] =  useState<Research | null>({
+    topic: '',
+    webSearch: {
+      query: '',
+      answer: '',
+      results: [],
+    },
+    conversation: [],
+  });
   const [searchResults, setSearchResults] = useState<SearchResults | null>({
     query: '',
     answer: '',
@@ -206,6 +278,14 @@ export function ConsolePage() {
       localStorage.setItem('tmp::tavily_api_key', tavilyApiKey);
       window.location.reload();
     }
+  }, []);
+
+  const openConsole = useCallback(async () => {
+    setIsConsoleOpen(true);
+  }, []);
+
+  const closeConsole = useCallback(async () => {
+    setIsConsoleOpen(false);
   }, []);
 
   /**
@@ -475,6 +555,10 @@ export function ConsolePage() {
               type: "string",
               description: "The search query you want to search the web for."
             },
+            researchTopic: {
+              type: "string",
+              description: "The topic being researched.",
+            },
             search_depth: {
               type: "string",
               description: "The depth of the search. It can be 'basic' or 'advanced'. Default is 'basic' unless specified otherwise.",
@@ -534,8 +618,8 @@ export function ConsolePage() {
         }
       },
       async (
-        { query, search_depth, topic, days, max_results, include_images, include_image_descriptions, include_answer, include_raw_content, include_domains, exclude_domains }:
-          { query: string, search_depth: string, topic: string, days: number, max_results: number, include_images: boolean, include_image_descriptions: boolean, include_answer: boolean, include_raw_content: boolean, include_domains: Array<string>, exclude_domains: Array<string> }) => {
+        { query, researchTopic, search_depth, topic, days, max_results, include_images, include_image_descriptions, include_answer, include_raw_content, include_domains, exclude_domains }:
+          { query: string, researchTopic: string, search_depth: string, topic: string, days: number, max_results: number, include_images: boolean, include_image_descriptions: boolean, include_answer: boolean, include_raw_content: boolean, include_domains: Array<string>, exclude_domains: Array<string> }) => {
         const result = await fetch('https://api.tavily.com/search', {
           method: 'POST',
           headers: {
@@ -556,10 +640,15 @@ export function ConsolePage() {
             exclude_domains,
           }),
         });
-        // {"detail":[{"type":"model_attributes_type","loc":["body"],"msg":"Input should be a valid dictionary or object to extract fields from","input":"{\"api_key\":\"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\",\"query\":\"DOCS current stock price NYSE\",\"include_answer\":true}"}]}
         const json = await result.json();
+        console.log('Web search for...', query);
         setSearchResults((res) => json);
-        console.log(searchResults);
+        setWebSearches(webSearches.concat([json]));
+        setCurrentResearch({
+          topic: researchTopic,
+          webSearch: json,
+          conversation: []
+        });
         setMemoryKv((memoryKv) => {
           const newKv = { ...memoryKv };
           newKv['last_web_search'] = `Question: ${json.query}\nAnswer: ${json.answer}`;
@@ -648,6 +737,10 @@ export function ConsolePage() {
         item.formatted.file = wavFile;
       }
       setItems(items);
+      setCurrentResearch({
+        ...(currentResearch || {topic: 'unknown', webSearch: {query: '', answer: '', results: []} }),
+        conversation: items
+      });
     });
 
     setItems(client.conversation.getItems());
@@ -666,7 +759,7 @@ export function ConsolePage() {
       <div className="content-top">
         <div className="content-title">
           <img src="/logo.png" />
-          <span>ThinkTank.io</span>
+          <span>Live Research</span>
         </div>
         <div className="content-api-key">
           {!LOCAL_RELAY_SERVER_URL && (
@@ -689,7 +782,72 @@ export function ConsolePage() {
           />
         </div>
       </div>
-      <div className="content-main">
+      <div className={`content-main ${isConsoleOpen ? 'closed' : 'open'}`}>
+        <div className="content-logs">
+          <h1>Research</h1>
+          <div className="content-block conversation">
+            {currentResearch && (
+              <div>
+                <h2>{currentResearch.topic}</h2>
+                <h3><b>Web Search: </b>{currentResearch.webSearch.query}</h3>
+                <div className="web-results" dangerouslySetInnerHTML={{ __html: sanitizeHtml(currentResearch.webSearch.answer) }}>
+                </div>
+              </div>
+            )}
+            <div className="content-block-title">conversation</div>
+            <div className="content-block-body" data-conversation-content>
+              {!items.length && `awaiting connection...`}
+              {items.map((conversationItem, i) => {
+                return (
+                  <div className="conversation-item" key={conversationItem.id}>
+                    <div className={`speaker-content`}>
+                      {/* tool response */}
+                      {conversationItem.type === 'function_call_output' && (
+                        <div>{conversationItem.formatted.output}</div>
+                      )}
+                      {!conversationItem.formatted.tool &&
+                        conversationItem.role === 'user' && (
+                          <div>
+                            {conversationItem.formatted.transcript ||
+                              (conversationItem.formatted.audio?.length
+                                ? '(awaiting transcript)'
+                                : conversationItem.formatted.text ||
+                                  '(item sent)')}
+                          </div>
+                        )}
+                      {!conversationItem.formatted.tool &&
+                        conversationItem.role === 'assistant' && (
+                          <div>
+                            {conversationItem.formatted.transcript ||
+                              conversationItem.formatted.text ||
+                              '(truncated)'}
+                          </div>
+                        )}
+                      {conversationItem.role === 'assistant' && conversationItem.formatted.file && (
+                        <audio
+                          src={conversationItem.formatted.file.url}
+                          controls
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <div className="content-right">
+          <h2>Web Searches</h2>
+          {webSearches.map((webSearch, i) => {
+            return (
+              <div className="web-search" key={`web-search-${i}`}>
+                <h3>{webSearch.query}</h3>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className={`content-main  console ${isConsoleOpen ? 'open' : 'closed'}`}>
         <div className="content-logs">
           <div className="content-block conversation">
             <div className="content-block-title">conversation</div>
@@ -829,34 +987,6 @@ export function ConsolePage() {
               })}
             </div>
           </div>
-          <div className="content-actions">
-            <Toggle
-              defaultValue={false}
-              labels={['manual', 'vad']}
-              values={['none', 'server_vad']}
-              onChange={(_, value) => changeTurnEndType(value)}
-            />
-            <div className="spacer" />
-            {isConnected && canPushToTalk && (
-              <Button
-                label={isRecording ? 'release to send' : 'push to talk'}
-                buttonStyle={isRecording ? 'alert' : 'regular'}
-                disabled={!isConnected || !canPushToTalk}
-                onMouseDown={startRecording}
-                onMouseUp={stopRecording}
-              />
-            )}
-            <div className="spacer" />
-            <Button
-              label={isConnected ? 'disconnect' : 'connect'}
-              iconPosition={isConnected ? 'end' : 'start'}
-              icon={isConnected ? X : Zap}
-              buttonStyle={isConnected ? 'regular' : 'action'}
-              onClick={
-                isConnected ? disconnectConversation : connectConversation
-              }
-            />
-          </div>
         </div>
         <div className="content-right">
           <div className="content-block search">
@@ -899,6 +1029,46 @@ export function ConsolePage() {
               {JSON.stringify(memoryKv, null, 2)}
             </div>
           </div>
+        </div>
+      </div>
+      <div className="content-bottom">
+        <div className="content-actions">
+          <Toggle
+            defaultValue={false}
+            labels={['manual', 'vad']}
+            values={['none', 'server_vad']}
+            onChange={(_, value) => changeTurnEndType(value)}
+          />
+          <div className="spacer" />
+          {isConnected && canPushToTalk && (
+            <Button
+              label={isRecording ? 'release to send' : 'push to talk'}
+              buttonStyle={isRecording ? 'alert' : 'regular'}
+              disabled={!isConnected || !canPushToTalk}
+              onMouseDown={startRecording}
+              onMouseUp={stopRecording}
+            />
+          )}
+          <div className="spacer" />
+          <Button
+            label={isConsoleOpen ? 'close console' : 'open console'}
+            iconPosition={isConsoleOpen ? 'end' : 'start'}
+            icon={isConnected ? X : Maximize2}
+            buttonStyle={isConsoleOpen ? 'regular' : 'action'}
+            onClick={
+              isConsoleOpen ? closeConsole : openConsole
+            }
+          />
+          <div className="spacer" />
+          <Button
+            label={isConnected ? 'disconnect' : 'connect'}
+            iconPosition={isConnected ? 'end' : 'start'}
+            icon={isConnected ? X : Zap}
+            buttonStyle={isConnected ? 'regular' : 'action'}
+            onClick={
+              isConnected ? disconnectConversation : connectConversation
+            }
+          />
         </div>
       </div>
     </div>

@@ -33,6 +33,21 @@
     }
   }
 
+  .content-bottom {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    min-height: 40px;
+    & > .content-actions {
+      flex-grow: 0;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+  }
+
   .content-main {
     flex-grow: 1;
     flex-shrink: 1 !important;
@@ -154,6 +169,14 @@
       }
     }
   }
+
+  .content-main.open {
+    display: flex;
+  }
+  .content-main.closed {
+    display: none;
+  }
+
 
   .conversation-item {
     position: relative;
